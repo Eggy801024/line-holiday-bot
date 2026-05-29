@@ -191,6 +191,7 @@ export class HolidayService {
     this.sheets = sheetsClient;
     this.config = config;
     this.mainSheetName = null;
+    this.messageQueue = Promise.resolve();
   }
 
   async resolveMainSheetName() {
@@ -440,7 +441,13 @@ export class HolidayService {
     await this.sheets.batchUpdateValues(updates);
   }
 
-  async handleTextMessage({ text, source, displayName }) {
+  async handleTextMessage(message) {
+    const queued = this.messageQueue.then(() => this.processTextMessage(message));
+    this.messageQueue = queued.catch(() => {});
+    return queued;
+  }
+
+  async processTextMessage({ text, source, displayName }) {
     const normalizedText = cleanText(text);
     const groupId = getGroupId(source);
 
