@@ -107,6 +107,7 @@ function findOriginalHolidayColumn(values, groupCol) {
       if (
         textIncludes(row[colIndex], "原本休假") ||
         textIncludes(row[colIndex], "原休") ||
+        textIncludes(row[colIndex], "原例休") ||
         textIncludes(row[colIndex], "異動前")
       ) {
         if (best === -1 || colIndex < best) best = colIndex;
@@ -128,8 +129,8 @@ function discoverRoster(values, config) {
     const originalCol = findOriginalHolidayColumn(values, header.groupCol);
     const dateStartCol = header.groupCol + 1;
     const dateEndCol =
-      originalCol > dateStartCol
-        ? originalCol - 1
+      originalCol >= dateStartCol
+        ? originalCol
         : dateStartCol + config.rules.maxDateColumnsWithoutOriginal - 1;
 
     const block = {
@@ -318,10 +319,7 @@ export class HolidayService {
 
     for (const block of snapshot.roster.blocks) {
       for (let colIndex = block.dateStartCol; colIndex <= block.dateEndCol; colIndex += 1) {
-        const iso = normalizeDateValue(
-          snapshot.values[block.rowIndex]?.[colIndex],
-          this.config.timeZone,
-        );
+        const iso = this.getDateIsoAtColumn(snapshot, block, colIndex);
         if (!iso) continue;
 
         const [, month, day] = iso.split("-").map(Number);
@@ -331,6 +329,19 @@ export class HolidayService {
 
     return uniqueBy(dates, (date) => `${date.colIndex}:${date.iso}`).sort((a, b) =>
       a.iso.localeCompare(b.iso),
+    );
+  }
+
+  getDateIsoAtColumn(snapshot, block, colIndex) {
+    const sameRow = normalizeDateValue(
+      snapshot.values[block.rowIndex]?.[colIndex],
+      this.config.timeZone,
+    );
+    if (sameRow) return sameRow;
+
+    return normalizeDateValue(
+      snapshot.values[block.rowIndex + 1]?.[colIndex],
+      this.config.timeZone,
     );
   }
 
@@ -385,8 +396,7 @@ export class HolidayService {
     for (let colIndex = block.dateStartCol; colIndex <= block.dateEndCol; colIndex += 1) {
       if (cleanText(row[colIndex]).toUpperCase() !== this.config.rules.newMark) continue;
 
-      const headerValue = snapshot.values[block.rowIndex]?.[colIndex];
-      const iso = normalizeDateValue(headerValue, this.config.timeZone);
+      const iso = this.getDateIsoAtColumn(snapshot, block, colIndex);
       return {
         colIndex,
         iso,
@@ -647,6 +657,8 @@ export class HolidayService {
     const byTeam = new Map();
 
     for (const employee of snapshot.roster.employees) {
+      if (this.getDateIsoAtColumn(snapshot, employee.block, colIndex) !== dateIso) continue;
+
       const cell = cleanText(snapshot.values[employee.rowIndex]?.[colIndex]).toUpperCase();
       if (cell !== this.config.rules.newMark) continue;
 
@@ -661,6 +673,7 @@ export class HolidayService {
         .filter(Boolean);
       const team = teamNames[0];
       if (!team || lines.some((line) => line.startsWith(`${team}:`))) continue;
+      if (this.getDateIsoAtColumn(snapshot, block, colIndex) !== dateIso) continue;
 
       const names = byTeam.get(team) || [];
       lines.push(
