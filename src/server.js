@@ -65,7 +65,11 @@ async function main() {
           console.error("Event handling failed:", error);
           await line.replyText(
             event.replyToken,
-            `系統處理失敗：${error.message}`,
+            [
+              `中文：系統處理失敗，請聯絡組長。錯誤：${error.message}`,
+              `English: The system failed to process the request. Please contact the leader. Error: ${error.message}`,
+              `Tiếng Việt: Hệ thống xử lý thất bại. Vui lòng liên hệ tổ trưởng. Lỗi: ${error.message}`,
+            ].join("\n"),
           );
         }
       }
