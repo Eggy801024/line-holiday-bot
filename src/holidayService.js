@@ -62,6 +62,24 @@ function multiLang({ zh, en, vi }) {
   return [`中文：${zh}`, `English: ${en}`, `Tiếng Việt: ${vi}`].join("\n");
 }
 
+function dateInputHasMonth(text) {
+  return /(\d)\s*(\/|-|\.|月)/.test(cleanText(text));
+}
+
+function uniqueBy(items, keyFn) {
+  const seen = new Set();
+  const result = [];
+
+  for (const item of items) {
+    const key = keyFn(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
+
 function findHeaderRows(values) {
   const headers = [];
 
@@ -295,52 +313,52 @@ export class HolidayService {
     ]);
   }
 
-  async ensureDateColumn(dateIso, snapshot) {
-    const { values, roster } = snapshot;
-    const sheetName = snapshot.sheetName;
+  collectDateColumns(snapshot) {
+    const dates = [];
 
-    for (const block of roster.blocks) {
+    for (const block of snapshot.roster.blocks) {
       for (let colIndex = block.dateStartCol; colIndex <= block.dateEndCol; colIndex += 1) {
-        const headerDate = normalizeDateValue(
-          values[block.rowIndex]?.[colIndex],
+        const iso = normalizeDateValue(
+          snapshot.values[block.rowIndex]?.[colIndex],
           this.config.timeZone,
         );
-        if (headerDate === dateIso) return { colIndex, snapshot };
+        if (!iso) continue;
+
+        const [, month, day] = iso.split("-").map(Number);
+        dates.push({ colIndex, iso, month, day });
       }
     }
 
-    const firstBlock = roster.blocks[0];
-    for (
-      let colIndex = firstBlock.dateStartCol;
-      colIndex <= firstBlock.dateEndCol;
-      colIndex += 1
-    ) {
-      const isBlankInEveryBlock = roster.blocks.every(
-        (block) => !cleanText(values[block.rowIndex]?.[colIndex]),
-      );
+    return uniqueBy(dates, (date) => `${date.colIndex}:${date.iso}`).sort((a, b) =>
+      a.iso.localeCompare(b.iso),
+    );
+  }
 
-      if (isBlankInEveryBlock) {
-        await this.writeDateHeaderToBlocks(sheetName, roster.blocks, colIndex, dateIso);
-        const updatedSnapshot = await this.loadMainSheet();
-        return { colIndex, snapshot: updatedSnapshot };
-      }
+  resolveDateColumn(parsedDate, text, snapshot) {
+    const dates = this.collectDateColumns(snapshot);
+    const exact = dates.find((date) => date.iso === parsedDate.iso);
+    if (exact) return exact;
+
+    const sameMonthDay = dates.filter(
+      (date) => date.month === parsedDate.month && date.day === parsedDate.day,
+    );
+    if (sameMonthDay.length === 1) return sameMonthDay[0];
+
+    if (!dateInputHasMonth(text)) {
+      const sameDay = dates.filter((date) => date.day === parsedDate.day);
+      if (sameDay.length === 1) return sameDay[0];
     }
 
-    if (firstBlock.originalCol > firstBlock.dateStartCol) {
-      await this.sheets.insertColumnBefore(sheetName, firstBlock.originalCol);
-      const afterInsert = await this.loadMainSheet();
-      const insertedCol = afterInsert.roster.blocks[0].originalCol - 1;
-      await this.writeDateHeaderToBlocks(
-        afterInsert.sheetName,
-        afterInsert.roster.blocks,
-        insertedCol,
-        dateIso,
-      );
-      const updatedSnapshot = await this.loadMainSheet();
-      return { colIndex: insertedCol, snapshot: updatedSnapshot };
-    }
+    return null;
+  }
 
-    throw new Error("日期欄位已滿，請先整理表格欄位。");
+  formatAvailableDateRange(snapshot) {
+    const dates = this.collectDateColumns(snapshot);
+    if (dates.length === 0) return "";
+
+    const first = formatDateForReply(dates[0].iso);
+    const last = formatDateForReply(dates[dates.length - 1].iso);
+    return first === last ? first : `${first}-${last}`;
   }
 
   async writeDateHeaderToBlocks(sheetName, blocks, colIndex, dateIso) {
@@ -450,6 +468,24 @@ export class HolidayService {
     }
 
     const snapshot = await this.loadMainSheet();
+    const matchedDate = this.resolveDateColumn(parsedDate, normalizedText, snapshot);
+    if (!matchedDate) {
+      const rangeText = this.formatAvailableDateRange(snapshot) || "目前表格日期範圍";
+      await this.appendLog({
+        status: "NEED_DATE",
+        dateIso: parsedDate.iso,
+        displayName,
+        source,
+        text,
+        note: "輸入日期不在表格指定範圍內",
+      });
+      return multiLang({
+        zh: `此日期不在表格指定範圍內，請依照表格日期輸入。目前可登記日期：${rangeText}`,
+        en: `This date is not in the sheet date range. Please enter a date shown in the sheet. Available dates: ${rangeText}`,
+        vi: `Ngày này không nằm trong phạm vi ngày của bảng. Vui lòng nhập ngày có trong bảng. Ngày có thể đăng ký: ${rangeText}`,
+      });
+    }
+
     let workerId = workerIdInText;
 
     if (!workerId && source?.userId) {
@@ -458,17 +494,13 @@ export class HolidayService {
     }
 
     if (isStatusQuery) {
-      const { colIndex, snapshot: dateSnapshot } = await this.ensureDateColumn(
-        parsedDate.iso,
-        snapshot,
-      );
-      return this.buildDateStatusReply(dateSnapshot, parsedDate.iso, colIndex);
+      return this.buildDateStatusReply(snapshot, matchedDate.iso, matchedDate.colIndex);
     }
 
     if (!workerId) {
       await this.appendLog({
         status: "NEED_WORKER_ID",
-        dateIso: parsedDate.iso,
+        dateIso: matchedDate.iso,
         displayName,
         source,
         text,
@@ -485,7 +517,7 @@ export class HolidayService {
     if (!employee) {
       await this.appendLog({
         status: "REJECTED_UNKNOWN_WORKER",
-        dateIso: parsedDate.iso,
+        dateIso: matchedDate.iso,
         displayName,
         source,
         text,
@@ -503,7 +535,7 @@ export class HolidayService {
       await this.appendLog({
         status: "REJECTED_WRONG_GROUP",
         employee,
-        dateIso: parsedDate.iso,
+        dateIso: matchedDate.iso,
         displayName,
         source,
         text,
@@ -525,7 +557,7 @@ export class HolidayService {
       await this.appendLog({
         status: "REJECTED_UNKNOWN_WORKER",
         employee,
-        dateIso: parsedDate.iso,
+        dateIso: matchedDate.iso,
         displayName,
         source,
         text,
@@ -538,10 +570,8 @@ export class HolidayService {
       });
     }
 
-    const { colIndex, snapshot: dateSnapshot } = await this.ensureDateColumn(
-      parsedDate.iso,
-      snapshot,
-    );
+    const colIndex = matchedDate.colIndex;
+    const dateSnapshot = snapshot;
     const refreshedEmployee = this.findEmployee(dateSnapshot, employee.workerId);
     const existingSelection = this.findExistingSelection(dateSnapshot, refreshedEmployee);
 
@@ -549,7 +579,7 @@ export class HolidayService {
       await this.appendLog({
         status: "REJECTED_DUPLICATE",
         employee: refreshedEmployee,
-        dateIso: parsedDate.iso,
+        dateIso: matchedDate.iso,
         displayName,
         source,
         text,
@@ -568,16 +598,16 @@ export class HolidayService {
       await this.appendLog({
         status: "REJECTED_FULL",
         employee: refreshedEmployee,
-        dateIso: parsedDate.iso,
+        dateIso: matchedDate.iso,
         displayName,
         source,
         text,
-        note: `${formatDateForReply(parsedDate.iso)} 已有 ${count} 人`,
+        note: `${formatDateForReply(matchedDate.iso)} 已有 ${count} 人`,
       });
       return multiLang({
-        zh: `${formatDateForReply(parsedDate.iso)} 已有 ${count} 人登記，名額已滿，請改選其他日期。`,
-        en: `${formatDateForReply(parsedDate.iso)} already has ${count} people registered. The limit is full. Please choose another date.`,
-        vi: `Ngày ${formatDateForReply(parsedDate.iso)} đã có ${count} người đăng ký, đã hết chỗ. Vui lòng chọn ngày khác.`,
+        zh: `${formatDateForReply(matchedDate.iso)} 已有 ${count} 人登記，名額已滿，請改選其他日期。`,
+        en: `${formatDateForReply(matchedDate.iso)} already has ${count} people registered. The limit is full. Please choose another date.`,
+        vi: `Ngày ${formatDateForReply(matchedDate.iso)} đã có ${count} người đăng ký, đã hết chỗ. Vui lòng chọn ngày khác.`,
       });
     }
 
@@ -591,7 +621,7 @@ export class HolidayService {
     await this.appendLog({
       status: "ACCEPTED",
       employee: refreshedEmployee,
-      dateIso: parsedDate.iso,
+      dateIso: matchedDate.iso,
       displayName,
       source,
       text,
@@ -600,9 +630,9 @@ export class HolidayService {
 
     const remaining = Math.max(0, this.config.rules.maxPerDate - (isSameCell ? count : count + 1));
     return multiLang({
-      zh: `${refreshedEmployee.name} 已成功登記 ${formatDateForReply(parsedDate.iso)}。\n${refreshedEmployee.team} 剩餘名額：${remaining}`,
-      en: `${refreshedEmployee.name} has successfully registered for ${formatDateForReply(parsedDate.iso)}.\nRemaining slots for ${refreshedEmployee.team}: ${remaining}`,
-      vi: `${refreshedEmployee.name} đã đăng ký thành công ngày ${formatDateForReply(parsedDate.iso)}.\nSố chỗ còn lại của ${refreshedEmployee.team}: ${remaining}`,
+      zh: `${refreshedEmployee.name} 已成功登記 ${formatDateForReply(matchedDate.iso)}。\n${refreshedEmployee.team} 剩餘名額：${remaining}`,
+      en: `${refreshedEmployee.name} has successfully registered for ${formatDateForReply(matchedDate.iso)}.\nRemaining slots for ${refreshedEmployee.team}: ${remaining}`,
+      vi: `${refreshedEmployee.name} đã đăng ký thành công ngày ${formatDateForReply(matchedDate.iso)}.\nSố chỗ còn lại của ${refreshedEmployee.team}: ${remaining}`,
     });
   }
 
