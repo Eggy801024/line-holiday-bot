@@ -2,7 +2,7 @@ const FULL_WIDTH_DIGITS = "０１２３４５６７８９";
 
 function toHalfWidth(input) {
   return String(input).replace(/[０-９]/g, (char) =>
-    String(FULL_WIDTH_DIGITS.indexOf(char))
+    String(FULL_WIDTH_DIGITS.indexOf(char)),
   );
 }
 
@@ -59,6 +59,15 @@ function resolveMonth(day, today) {
   return { year, month };
 }
 
+function normalizeText(text) {
+  return toHalfWidth(text)
+    .replace(/[／]/g, "/")
+    .replace(/[－—–]/g, "-")
+    .replace(/[．。]/g, ".")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function normalizeDateValue(value, timeZone = "Asia/Taipei") {
   if (value === null || value === undefined || value === "") return null;
 
@@ -82,16 +91,11 @@ export function normalizeDateValue(value, timeZone = "Asia/Taipei") {
 }
 
 export function parseDateFromText(text, timeZone = "Asia/Taipei", todayOverride = null) {
-  const normalized = toHalfWidth(text)
-    .replace(/[／]/g, "/")
-    .replace(/[．。]/g, ".")
-    .replace(/\s+/g, " ")
-    .trim();
-
+  const normalized = normalizeText(text);
   const today = todayOverride || getTodayParts(timeZone);
 
   const fullDate = normalized.match(
-    /(?<!\d)(20\d{2}|19\d{2})\s*[年\/\-.]\s*(1[0-2]|0?[1-9])\s*[月\/\-.]\s*(3[01]|[12]?\d|0?[1-9])\s*(?:日|號)?(?!\d)/,
+    /(?:^|[^\dA-Za-z])((?:20|19)\d{2})\s*(?:年|\/|-|\.)\s*(1[0-2]|0?[1-9])\s*(?:月|\/|-|\.)\s*(3[01]|[12]?\d|0?[1-9])\s*(?:日|號|号)?(?=$|[^\dA-Za-z])/,
   );
   if (fullDate) {
     const year = Number(fullDate[1]);
@@ -102,7 +106,7 @@ export function parseDateFromText(text, timeZone = "Asia/Taipei", todayOverride 
   }
 
   const monthDay = normalized.match(
-    /(?<!\d)(1[0-2]|0?[1-9])\s*(?:月|[\/\-.])\s*(3[01]|[12]?\d|0?[1-9])\s*(?:日|號)?(?!\d)/,
+    /(?:^|[^\dA-Za-z])(1[0-2]|0?[1-9])\s*(?:月|\/|-|\.)\s*(3[01]|[12]?\d|0?[1-9])\s*(?:日|號|号)?(?=$|[^\dA-Za-z])/,
   );
   if (monthDay) {
     const month = Number(monthDay[1]);
@@ -112,7 +116,9 @@ export function parseDateFromText(text, timeZone = "Asia/Taipei", todayOverride 
     return toDateResult(year, month, day);
   }
 
-  const dayOnly = normalized.match(/(?<!\d)(3[01]|[12]?\d|0?[1-9])\s*(?:日|號)(?!\d)/);
+  const dayOnly = normalized.match(
+    /(?:^|[^\dA-Za-z])(3[01]|[12]?\d|0?[1-9])\s*(?:日|號|号)?(?=$|[^\dA-Za-z])/,
+  );
   if (dayOnly) {
     const day = Number(dayOnly[1]);
     const { year, month } = resolveMonth(day, today);
@@ -129,7 +135,7 @@ export function formatDateForSheet(iso) {
 }
 
 export function formatDateForReply(iso) {
-  const [year, month, day] = iso.split("-");
+  const [, , month, day] = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return `${Number(month)}/${Number(day)}`;
 }
 
