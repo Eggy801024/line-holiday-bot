@@ -484,6 +484,10 @@ export class HolidayService {
       return null;
     }
 
+    if (!workerIdInText && !isStatusQuery) {
+      return null;
+    }
+
     const snapshot = await this.loadMainSheet();
     const matchedDate = this.resolveDateColumn(parsedDate, normalizedText, snapshot);
     if (!matchedDate) {
