@@ -61,6 +61,24 @@ class FakeSheetsClient {
   }
 }
 
+class ThrowingSheetsClient {
+  async getSpreadsheet() {
+    throw new Error("Sheets should not be read for ignored messages");
+  }
+
+  async ensureSheet() {
+    throw new Error("Sheets should not be read for ignored messages");
+  }
+
+  async getValues() {
+    throw new Error("Sheets should not be read for ignored messages");
+  }
+
+  async appendValues() {
+    throw new Error("Ignored messages should not be logged");
+  }
+}
+
 function makeConfig() {
   return {
     timeZone: "Asia/Taipei",
@@ -94,6 +112,36 @@ function makeSheetValues() {
 
   return values;
 }
+
+test("ignores date-only messages instead of replying from LINE binding", async () => {
+  const service = new HolidayService({
+    sheetsClient: new ThrowingSheetsClient(),
+    config: makeConfig(),
+  });
+
+  const reply = await service.handleTextMessage({
+    text: "6/8",
+    source: { type: "group", groupId: "G1", userId: "U1" },
+    displayName: "user-1",
+  });
+
+  assert.equal(reply, null);
+});
+
+test("ignores normal group chat that happens to mention a date", async () => {
+  const service = new HolidayService({
+    sheetsClient: new ThrowingSheetsClient(),
+    config: makeConfig(),
+  });
+
+  const reply = await service.handleTextMessage({
+    text: "大家 6/8 要開會",
+    source: { type: "group", groupId: "G1", userId: "U1" },
+    displayName: "user-1",
+  });
+
+  assert.equal(reply, null);
+});
 
 test("serializes concurrent registrations so max per date is not exceeded", async () => {
   const sheets = new FakeSheetsClient(makeSheetValues());
