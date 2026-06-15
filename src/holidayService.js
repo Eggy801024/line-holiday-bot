@@ -80,6 +80,24 @@ function uniqueBy(items, keyFn) {
   return result;
 }
 
+function isSameColor(actual, expected) {
+  if (!actual || !expected) return false;
+  const tolerance = 0.01;
+  return (
+    Math.abs((actual.red || 0) - (expected.red || 0)) <= tolerance &&
+    Math.abs((actual.green || 0) - (expected.green || 0)) <= tolerance &&
+    Math.abs((actual.blue || 0) - (expected.blue || 0)) <= tolerance
+  );
+}
+
+function isGreenColor(color) {
+  if (!color) return false;
+  const red = color.red || 0;
+  const green = color.green || 0;
+  const blue = color.blue || 0;
+  return green >= 0.45 && green > red + 0.15 && green > blue + 0.15;
+}
+
 function findHeaderRows(values) {
   const headers = [];
 
@@ -229,14 +247,15 @@ export class HolidayService {
   async loadMainSheet() {
     const sheetName = await this.resolveMainSheetName();
     const range = wholeSheetRange(sheetName);
-    const values = padTable(await this.sheets.getValues(range));
+    const cells = await this.sheets.getCells(range);
+    const values = padTable(cells.map((row) => row.map((cell) => cell.value)));
     const roster = discoverRoster(values, this.config);
 
     if (roster.employees.length === 0) {
       throw new Error(`找不到人員資料，請確認 ${sheetName} 有工號 / 姓名 / 組別欄位。`);
     }
 
-    return { sheetName, values, roster };
+    return { sheetName, values, cells, roster };
   }
 
   async loadBindings() {
@@ -395,7 +414,7 @@ export class HolidayService {
     const block = employee.block;
 
     for (let colIndex = block.dateStartCol; colIndex <= block.dateEndCol; colIndex += 1) {
-      if (cleanText(row[colIndex]).toUpperCase() !== this.config.rules.newMark) continue;
+      if (!this.isSelectedCell(snapshot, employee.rowIndex, colIndex)) continue;
 
       const iso = this.getDateIsoAtColumn(snapshot, block, colIndex);
       return {
@@ -411,34 +430,84 @@ export class HolidayService {
   countForDate(snapshot, team, colIndex) {
     return snapshot.roster.employees.filter((employee) => {
       if (employee.team !== team) return false;
-      const value = cleanText(snapshot.values[employee.rowIndex]?.[colIndex]).toUpperCase();
-      return value === this.config.rules.newMark;
+      return this.isSelectedCell(snapshot, employee.rowIndex, colIndex);
     }).length;
   }
 
+  isSelectedCell(snapshot, rowIndex, colIndex) {
+    const value = cleanText(snapshot.values[rowIndex]?.[colIndex]).toUpperCase();
+    const backgroundColor = snapshot.cells?.[rowIndex]?.[colIndex]?.backgroundColor;
+
+    return (
+      value === this.config.rules.newMark ||
+      isSameColor(backgroundColor, this.config.rules.selectedBackgroundColor)
+    );
+  }
+
+  findOriginalHolidayCell(snapshot, employee, excludeColIndex) {
+    const block = employee.block;
+
+    for (let colIndex = block.dateStartCol; colIndex <= block.dateEndCol; colIndex += 1) {
+      if (colIndex === excludeColIndex) continue;
+      const backgroundColor = snapshot.cells?.[employee.rowIndex]?.[colIndex]?.backgroundColor;
+      if (isGreenColor(backgroundColor)) return colIndex;
+    }
+
+    return null;
+  }
+
+  findWorkdayBackgroundColor(snapshot, employee) {
+    const block = employee.block;
+
+    for (let colIndex = block.dateStartCol; colIndex <= block.dateEndCol; colIndex += 1) {
+      const value = cleanText(snapshot.values[employee.rowIndex]?.[colIndex]).toUpperCase();
+      const backgroundColor = snapshot.cells?.[employee.rowIndex]?.[colIndex]?.backgroundColor;
+
+      if (
+        value === this.config.rules.workdayLabel &&
+        backgroundColor &&
+        !isGreenColor(backgroundColor) &&
+        !isSameColor(backgroundColor, this.config.rules.selectedBackgroundColor)
+      ) {
+        return backgroundColor;
+      }
+    }
+
+    return this.config.rules.workdayBackgroundColor;
+  }
+
   async writeAcceptedSelection(snapshot, employee, colIndex) {
-    const updates = [];
-    const row = snapshot.values[employee.rowIndex] || [];
     const block = employee.block;
     const sheetName = snapshot.sheetName;
+    const originalHolidayCol = this.findOriginalHolidayCell(snapshot, employee, colIndex);
 
     if (this.config.rules.allowChange) {
       for (let c = block.dateStartCol; c <= block.dateEndCol; c += 1) {
-        if (c !== colIndex && cleanText(row[c]).toUpperCase() === this.config.rules.newMark) {
-          updates.push({
-            range: singleCellA1(sheetName, employee.rowIndex, c),
-            values: [[""]],
-          });
+        if (c !== colIndex && this.isSelectedCell(snapshot, employee.rowIndex, c)) {
+          await this.sheets.updateValues(singleCellA1(sheetName, employee.rowIndex, c), [[""]]);
         }
       }
     }
 
-    updates.push({
-      range: singleCellA1(sheetName, employee.rowIndex, colIndex),
-      values: [[this.config.rules.newMark]],
-    });
+    if (originalHolidayCol !== null) {
+      await this.sheets.updateValues(singleCellA1(sheetName, employee.rowIndex, originalHolidayCol), [
+        [this.config.rules.workdayLabel],
+      ]);
+      await this.sheets.updateCellBackground(
+        sheetName,
+        employee.rowIndex,
+        originalHolidayCol,
+        this.findWorkdayBackgroundColor(snapshot, employee),
+      );
+    }
 
-    await this.sheets.batchUpdateValues(updates);
+    await this.sheets.updateValues(singleCellA1(sheetName, employee.rowIndex, colIndex), [[""]]);
+    await this.sheets.updateCellBackground(
+      sheetName,
+      employee.rowIndex,
+      colIndex,
+      this.config.rules.selectedBackgroundColor,
+    );
   }
 
   async handleTextMessage(message) {
@@ -670,8 +739,7 @@ export class HolidayService {
     for (const employee of snapshot.roster.employees) {
       if (this.getDateIsoAtColumn(snapshot, employee.block, colIndex) !== dateIso) continue;
 
-      const cell = cleanText(snapshot.values[employee.rowIndex]?.[colIndex]).toUpperCase();
-      if (cell !== this.config.rules.newMark) continue;
+      if (!this.isSelectedCell(snapshot, employee.rowIndex, colIndex)) continue;
 
       if (!byTeam.has(employee.team)) byTeam.set(employee.team, []);
       byTeam.get(employee.team).push(`${employee.name}(${employee.workerId})`);
