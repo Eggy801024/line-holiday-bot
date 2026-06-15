@@ -143,6 +143,27 @@ export class GoogleSheetsClient {
     return body.values || [];
   }
 
+  async getCells(a1Range) {
+    const body = await this.request(
+      `?includeGridData=true&ranges=${encodeURIComponent(a1Range)}&fields=sheets.data.rowData.values(effectiveValue,formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle))`,
+    );
+    const rowData = body.sheets?.[0]?.data?.[0]?.rowData || [];
+
+    return rowData.map((row) =>
+      (row.values || []).map((cell) => ({
+        value: cell.effectiveValue?.stringValue ??
+          cell.effectiveValue?.numberValue ??
+          cell.effectiveValue?.boolValue ??
+          cell.formattedValue ??
+          "",
+        backgroundColor:
+          cell.effectiveFormat?.backgroundColor ||
+          cell.effectiveFormat?.backgroundColorStyle?.rgbColor ||
+          null,
+      })),
+    );
+  }
+
   async updateValues(a1Range, values) {
     const params = new URLSearchParams({ valueInputOption: "USER_ENTERED" });
     return this.request(`/values/${encodeURIComponent(a1Range)}?${params.toString()}`, {
@@ -185,6 +206,33 @@ export class GoogleSheetsClient {
     return this.request(":batchUpdate", {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  async updateCellBackground(sheetName, rowIndex, colIndex, backgroundColor) {
+    const properties = await this.getSheetProperties(sheetName);
+    if (!properties) throw new Error(`Sheet not found: ${sheetName}`);
+
+    return this.batchUpdate({
+      requests: [
+        {
+          repeatCell: {
+            range: {
+              sheetId: properties.sheetId,
+              startRowIndex: rowIndex,
+              endRowIndex: rowIndex + 1,
+              startColumnIndex: colIndex,
+              endColumnIndex: colIndex + 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor,
+              },
+            },
+            fields: "userEnteredFormat.backgroundColor",
+          },
+        },
+      ],
     });
   }
 
