@@ -10,6 +10,10 @@ function delay(ms = 2) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const RED = { red: 1, green: 0, blue: 0 };
+const ORANGE = { red: 1, green: 0.75, blue: 0 };
+const GREEN = { red: 0, green: 0.5, blue: 0 };
+
 function colToIndex(label) {
   let value = 0;
   for (const char of label) {
@@ -28,8 +32,9 @@ function parseSingleCell(range) {
 }
 
 class FakeSheetsClient {
-  constructor(values) {
+  constructor(values, backgrounds = []) {
     this.values = values;
+    this.backgrounds = backgrounds;
     this.logs = [];
   }
 
@@ -45,12 +50,28 @@ class FakeSheetsClient {
     return clone(this.values);
   }
 
+  async getCells(range) {
+    await delay();
+    if (range.includes("Line綁定")) return [];
+
+    return this.values.map((row, rowIndex) =>
+      row.map((value, colIndex) => ({
+        value,
+        backgroundColor: this.backgrounds[rowIndex]?.[colIndex] || null,
+      })),
+    );
+  }
+
   async appendValues(range, rows) {
     await delay();
     this.logs.push({ range, rows });
   }
 
-  async updateValues() {}
+  async updateValues(range, values) {
+    await delay();
+    const { rowIndex, colIndex } = parseSingleCell(range);
+    this.values[rowIndex][colIndex] = values[0][0];
+  }
 
   async batchUpdateValues(data) {
     await delay();
@@ -58,6 +79,12 @@ class FakeSheetsClient {
       const { rowIndex, colIndex } = parseSingleCell(update.range);
       this.values[rowIndex][colIndex] = update.values[0][0];
     }
+  }
+
+  async updateCellBackground(sheetName, rowIndex, colIndex, backgroundColor) {
+    await delay();
+    if (!this.backgrounds[rowIndex]) this.backgrounds[rowIndex] = [];
+    this.backgrounds[rowIndex][colIndex] = backgroundColor;
   }
 }
 
@@ -71,6 +98,10 @@ class ThrowingSheetsClient {
   }
 
   async getValues() {
+    throw new Error("Sheets should not be read for ignored messages");
+  }
+
+  async getCells() {
     throw new Error("Sheets should not be read for ignored messages");
   }
 
@@ -93,6 +124,9 @@ function makeConfig() {
       workerIdPattern: /[A-Z]{1,3}\d{3,4}/i,
       groupTeamMap: {},
       newMark: "X",
+      selectedBackgroundColor: RED,
+      workdayLabel: "AD3",
+      workdayBackgroundColor: ORANGE,
       oldMark: "O",
       maxDateColumnsWithoutOriginal: 31,
     },
@@ -107,10 +141,30 @@ function makeSheetValues() {
   ];
 
   for (let i = 1; i <= 50; i += 1) {
-    values.push([`BA${String(i).padStart(3, "0")}`, `人員${i}`, "AN_A"]);
+    values.push([
+      `BA${String(i).padStart(3, "0")}`,
+      `人員${i}`,
+      "AN_A",
+      "AD3",
+      "AD3",
+      "AD3",
+      "AD3",
+      "AD3",
+      "AD3",
+      "AD3",
+    ]);
   }
 
   return values;
+}
+
+function makeBackgrounds(values) {
+  return values.map((row, rowIndex) =>
+    row.map((_, colIndex) => {
+      if (rowIndex >= 3 && colIndex >= 3) return colIndex === 9 ? GREEN : ORANGE;
+      return null;
+    }),
+  );
 }
 
 test("ignores date-only messages instead of replying from LINE binding", async () => {
@@ -144,7 +198,8 @@ test("ignores normal group chat that happens to mention a date", async () => {
 });
 
 test("serializes concurrent registrations so max per date is not exceeded", async () => {
-  const sheets = new FakeSheetsClient(makeSheetValues());
+  const values = makeSheetValues();
+  const sheets = new FakeSheetsClient(values, makeBackgrounds(values));
   const service = new HolidayService({ sheetsClient: sheets, config: makeConfig() });
 
   const messages = Array.from({ length: 50 }, (_, index) =>
@@ -160,9 +215,33 @@ test("serializes concurrent registrations so max per date is not exceeded", asyn
   const full = replies.filter((reply) => reply.includes("名額已滿")).length;
   const selectedCount = sheets.values
     .slice(3, 53)
-    .filter((row) => String(row[4] || "").toUpperCase() === "X").length;
+    .filter((row, index) => {
+      const color = sheets.backgrounds[index + 3]?.[4];
+      return color?.red === 1 && color?.green === 0 && color?.blue === 0;
+    }).length;
 
   assert.equal(accepted, 2);
   assert.equal(full, 48);
   assert.equal(selectedCount, 2);
+});
+
+test("marks selected date red and changes original green holiday to orange AD3", async () => {
+  const values = makeSheetValues();
+  const sheets = new FakeSheetsClient(values, makeBackgrounds(values));
+  const service = new HolidayService({ sheetsClient: sheets, config: makeConfig() });
+
+  const reply = await service.handleTextMessage({
+    text: "BA001 6/8",
+    source: { type: "group", groupId: "G1" },
+    displayName: "user-1",
+  });
+
+  assert.match(reply, /已成功登記/);
+  const selectedCol = sheets.backgrounds[3].findIndex(
+    (color) => color?.red === 1 && color?.green === 0 && color?.blue === 0,
+  );
+  assert.equal(selectedCol, 4);
+  assert.equal(sheets.values[3][selectedCol], "");
+  assert.equal(sheets.values[3][9], "AD3");
+  assert.deepEqual(sheets.backgrounds[3][9], ORANGE);
 });
