@@ -38,21 +38,21 @@ export function loadEnvFile(filePath = path.resolve(".env")) {
   }
 }
 
-function getRequired(name) {
-  const value = process.env[name];
+function getRequired(name, env = process.env) {
+  const value = env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
 
-function parseServiceAccountJson(filePath) {
-  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+function parseServiceAccountJsonContent(content, sourceName) {
+  const parsed = JSON.parse(content);
 
   if (parsed.type !== "service_account") {
-    throw new Error(`${filePath} is not a service account JSON file`);
+    throw new Error(`${sourceName} is not a service account JSON file`);
   }
 
   if (!parsed.client_email || !parsed.private_key) {
-    throw new Error(`${filePath} is missing client_email or private_key`);
+    throw new Error(`${sourceName} is missing client_email or private_key`);
   }
 
   return {
@@ -61,13 +61,17 @@ function parseServiceAccountJson(filePath) {
   };
 }
 
-function getPrivateKey() {
-  if (process.env.GOOGLE_PRIVATE_KEY) {
-    return process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n");
+function parseServiceAccountJson(filePath) {
+  return parseServiceAccountJsonContent(fs.readFileSync(filePath, "utf8"), filePath);
+}
+
+function getPrivateKey(env = process.env) {
+  if (env.GOOGLE_PRIVATE_KEY) {
+    return env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n");
   }
 
-  if (process.env.GOOGLE_PRIVATE_KEY_PATH) {
-    const content = fs.readFileSync(process.env.GOOGLE_PRIVATE_KEY_PATH, "utf8");
+  if (env.GOOGLE_PRIVATE_KEY_PATH) {
+    const content = fs.readFileSync(env.GOOGLE_PRIVATE_KEY_PATH, "utf8");
 
     if (content.trim().startsWith("{")) {
       const parsed = JSON.parse(content);
@@ -77,11 +81,11 @@ function getPrivateKey() {
     return content;
   }
 
-  throw new Error("Missing GOOGLE_PRIVATE_KEY, GOOGLE_PRIVATE_KEY_PATH, or GOOGLE_SERVICE_ACCOUNT_JSON_PATH in environment");
+  throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_PRIVATE_KEY, GOOGLE_PRIVATE_KEY_PATH, or GOOGLE_SERVICE_ACCOUNT_JSON_PATH in environment");
 }
 
-function parseJsonMap(name) {
-  const raw = process.env[name] || "{}";
+function parseJsonMap(name, env = process.env) {
+  const raw = env[name] || "{}";
   try {
     return JSON.parse(raw);
   } catch {
@@ -89,41 +93,43 @@ function parseJsonMap(name) {
   }
 }
 
-export function getConfig() {
-  loadEnvFile();
-  const serviceAccount = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH
-    ? parseServiceAccountJson(process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH)
+export function buildConfig(env = process.env) {
+  const serviceAccount = env.GOOGLE_SERVICE_ACCOUNT_JSON
+    ? parseServiceAccountJsonContent(env.GOOGLE_SERVICE_ACCOUNT_JSON, "GOOGLE_SERVICE_ACCOUNT_JSON")
+    : env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH
+    ? parseServiceAccountJson(env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH)
     : null;
 
   return {
-    port: Number(process.env.PORT || 3000),
-    timeZone: process.env.TIME_ZONE || "Asia/Taipei",
+    port: Number(env.PORT || 3000),
+    timeZone: env.TIME_ZONE || "Asia/Taipei",
     line: {
-      channelSecret: getRequired("LINE_CHANNEL_SECRET"),
-      channelAccessToken: getRequired("LINE_CHANNEL_ACCESS_TOKEN"),
+      channelSecret: getRequired("LINE_CHANNEL_SECRET", env),
+      channelAccessToken: getRequired("LINE_CHANNEL_ACCESS_TOKEN", env),
     },
     google: {
-      spreadsheetId: getRequired("GOOGLE_SPREADSHEET_ID"),
+      spreadsheetId: getRequired("GOOGLE_SPREADSHEET_ID", env),
       serviceAccountEmail:
-        process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+        env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
         serviceAccount?.serviceAccountEmail ||
-        getRequired("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
-      privateKey: serviceAccount?.privateKey || getPrivateKey(),
+        getRequired("GOOGLE_SERVICE_ACCOUNT_EMAIL", env),
+      privateKey: serviceAccount?.privateKey || getPrivateKey(env),
     },
     sheets: {
-      mainSheetName: process.env.SHEET_NAME || "例休",
-      logSheetName: process.env.LOG_SHEET_NAME || "例休回覆紀錄",
-      bindingSheetName: process.env.BINDING_SHEET_NAME || "Line綁定",
+      mainSheetName: env.SHEET_NAME || "例休",
+      logSheetName: env.LOG_SHEET_NAME || "例休回覆紀錄",
+      bindingSheetName: env.BINDING_SHEET_NAME || "Line綁定",
+      scheduledPushSheetName: env.SCHEDULED_PUSH_SHEET_NAME || "定時推播",
     },
     rules: {
-      maxPerDate: Number(process.env.MAX_PER_DATE || 2),
-      allowChange: String(process.env.ALLOW_CHANGE || "false").toLowerCase() ===
+      maxPerDate: Number(env.MAX_PER_DATE || 2),
+      allowChange: String(env.ALLOW_CHANGE || "false").toLowerCase() ===
         "true",
       workerIdPattern: new RegExp(
-        process.env.WORKER_ID_PATTERN || "[A-Z]{1,3}\\d{3,4}",
+        env.WORKER_ID_PATTERN || "[A-Z]{1,3}\\d{3,4}",
         "i",
       ),
-      groupTeamMap: parseJsonMap("GROUP_TEAM_MAP_JSON"),
+      groupTeamMap: parseJsonMap("GROUP_TEAM_MAP_JSON", env),
       newMark: "X",
       selectedBackgroundColor: { red: 1, green: 0, blue: 0 },
       workdayLabel: "AD3",
@@ -132,4 +138,9 @@ export function getConfig() {
       maxDateColumnsWithoutOriginal: 31,
     },
   };
+}
+
+export function getConfig() {
+  loadEnvFile();
+  return buildConfig(process.env);
 }
