@@ -57,6 +57,23 @@ export class LineClient {
     });
   }
 
+  async pushText(to, text) {
+    if (!to) return;
+
+    await this.request("/message/push", {
+      method: "POST",
+      body: JSON.stringify({
+        to,
+        messages: [
+          {
+            type: "text",
+            text,
+          },
+        ],
+      }),
+    });
+  }
+
   async getSourceProfile(source) {
     if (!source?.userId) return null;
 
