@@ -526,7 +526,7 @@ export class HolidayService {
       return RULES_TEXT;
     }
 
-    if (/^(群組資料|groupid|group id|ma nhom|mã nhóm)$/i.test(normalizedText)) {
+    if (/^(群組資訊|群組資料|群組ID|groupid|group id|ma nhom|mã nhóm)$/i.test(normalizedText)) {
       const mappedTeam = this.config.rules.groupTeamMap[groupId] || "未設定";
       return multiLang({
         zh: `groupId：${groupId || "無群組 ID"}\n對應組別：${mappedTeam}`,
