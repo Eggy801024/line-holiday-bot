@@ -25,6 +25,25 @@ function createRuntime(env) {
   return { line, holidayService, scheduledPushService };
 }
 
+async function sendLineResult(line, event, result) {
+  if (!result) return;
+
+  if (typeof result === "string") {
+    await line.replyText(event.replyToken, result);
+    return;
+  }
+
+  if (result.type !== "privateReply") return;
+
+  try {
+    await line.pushText(result.to, result.text);
+  } catch {
+    if (result.fallbackReply) {
+      await line.replyText(event.replyToken, result.fallbackReply);
+    }
+  }
+}
+
 async function processPayload(env, payload) {
   const { line, holidayService } = createRuntime(env);
 
@@ -39,9 +58,7 @@ async function processPayload(env, payload) {
         displayName: profile?.displayName || "",
       });
 
-      if (reply) {
-        await line.replyText(event.replyToken, reply);
-      }
+      await sendLineResult(line, event, reply);
     } catch (error) {
       console.error(
         JSON.stringify({
