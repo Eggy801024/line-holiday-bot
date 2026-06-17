@@ -197,6 +197,21 @@ test("ignores normal group chat that happens to mention a date", async () => {
   assert.equal(reply, null);
 });
 
+test("replies group id for group info command", async () => {
+  const service = new HolidayService({
+    sheetsClient: new ThrowingSheetsClient(),
+    config: makeConfig(),
+  });
+
+  const reply = await service.handleTextMessage({
+    text: "群組資訊",
+    source: { type: "group", groupId: "Cgroup123", userId: "U1" },
+    displayName: "user-1",
+  });
+
+  assert.match(reply, /Cgroup123/);
+});
+
 test("serializes concurrent registrations so max per date is not exceeded", async () => {
   const values = makeSheetValues();
   const sheets = new FakeSheetsClient(values, makeBackgrounds(values));
