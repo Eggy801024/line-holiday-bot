@@ -197,7 +197,7 @@ test("ignores normal group chat that happens to mention a date", async () => {
   assert.equal(reply, null);
 });
 
-test("replies group id for group info command", async () => {
+test("sends group id privately for group info command", async () => {
   const service = new HolidayService({
     sheetsClient: new ThrowingSheetsClient(),
     config: makeConfig(),
@@ -209,7 +209,10 @@ test("replies group id for group info command", async () => {
     displayName: "user-1",
   });
 
-  assert.match(reply, /Cgroup123/);
+  assert.equal(reply.type, "privateReply");
+  assert.equal(reply.to, "U1");
+  assert.match(reply.text, /Cgroup123/);
+  assert.doesNotMatch(reply.fallbackReply, /Cgroup123/);
 });
 
 test("serializes concurrent registrations so max per date is not exceeded", async () => {
