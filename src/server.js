@@ -18,6 +18,25 @@ function send(response, statusCode, body) {
   response.end(body);
 }
 
+async function sendLineResult(line, event, result) {
+  if (!result) return;
+
+  if (typeof result === "string") {
+    await line.replyText(event.replyToken, result);
+    return;
+  }
+
+  if (result.type !== "privateReply") return;
+
+  try {
+    await line.pushText(result.to, result.text);
+  } catch {
+    if (result.fallbackReply) {
+      await line.replyText(event.replyToken, result.fallbackReply);
+    }
+  }
+}
+
 async function main() {
   const config = getConfig();
   const line = new LineClient(config.line.channelAccessToken);
@@ -58,9 +77,7 @@ async function main() {
             displayName: profile?.displayName || "",
           });
 
-          if (reply) {
-            await line.replyText(event.replyToken, reply);
-          }
+          await sendLineResult(line, event, reply);
         } catch (error) {
           console.error("Event handling failed:", error);
           await line.replyText(
