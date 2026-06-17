@@ -1,0 +1,8 @@
+.env
+.dev.vars
+.dev.vars.*
+node_modules/
+.wrangler/
+npm-debug.log*
+*.log
+eggy-495601-c5d063f48805.json
