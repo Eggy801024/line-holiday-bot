@@ -528,11 +528,26 @@ export class HolidayService {
 
     if (/^(群組資訊|群組資料|群組ID|groupid|group id|ma nhom|mã nhóm)$/i.test(normalizedText)) {
       const mappedTeam = this.config.rules.groupTeamMap[groupId] || "未設定";
-      return multiLang({
+      const privateText = multiLang({
         zh: `groupId：${groupId || "無群組 ID"}\n對應組別：${mappedTeam}`,
         en: `groupId: ${groupId || "No group ID"}\nMapped team: ${mappedTeam}`,
         vi: `groupId: ${groupId || "Không có mã nhóm"}\nNhóm tương ứng: ${mappedTeam}`,
       });
+
+      if ((source?.type === "group" || source?.type === "room") && source?.userId) {
+        return {
+          type: "privateReply",
+          to: source.userId,
+          text: privateText,
+          fallbackReply: multiLang({
+            zh: "群組ID已改為私訊提供。請先加官方帳號好友後，再輸入群組資訊。",
+            en: "The group ID is sent privately. Please add the official account as a friend, then enter the group info command again.",
+            vi: "Mã nhóm sẽ được gửi riêng. Vui lòng thêm tài khoản chính thức làm bạn bè, sau đó nhập lại lệnh thông tin nhóm.",
+          }),
+        };
+      }
+
+      return privateText;
     }
 
     const parsedDate = parseDateFromText(normalizedText, this.config.timeZone);
