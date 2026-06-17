@@ -1,0 +1,47 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "line-holiday-bot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-06-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "TIME_ZONE": "Asia/Taipei",
+    "SHEET_NAME": "例休",
+    "LOG_SHEET_NAME": "例休回覆紀錄",
+    "BINDING_SHEET_NAME": "Line綁定",
+    "SCHEDULED_PUSH_SHEET_NAME": "定時推播",
+    "MAX_PER_DATE": "2",
+    "ALLOW_CHANGE": "false",
+    "WORKER_ID_PATTERN": "[A-Z]{1,3}\\d{3,4}",
+    "GROUP_TEAM_MAP_JSON": "{}"
+  },
+  "secrets": {
+    "required": [
+      "LINE_CHANNEL_SECRET",
+      "LINE_CHANNEL_ACCESS_TOKEN",
+      "GOOGLE_SPREADSHEET_ID",
+      "GOOGLE_SERVICE_ACCOUNT_JSON"
+    ]
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HOLIDAY_BOT_QUEUE",
+        "class_name": "HolidayBotQueue"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["HolidayBotQueue"]
+    }
+  ]
+}
