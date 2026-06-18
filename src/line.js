@@ -2,6 +2,34 @@ import crypto from "node:crypto";
 
 const LINE_API_ROOT = "https://api.line.me/v2/bot";
 
+function escapeTextV2Text(text) {
+  return text.replaceAll("{", "{{").replaceAll("}", "}}");
+}
+
+function buildTextMessage(text, options = {}) {
+  if (!options.mentionAll) {
+    return {
+      type: "text",
+      text,
+    };
+  }
+
+  const messageText = escapeTextV2Text(text).replace(/^@(?:所有人|all|everyone)\s*/i, "");
+
+  return {
+    type: "textV2",
+    text: `{all}\n${messageText}`,
+    substitution: {
+      all: {
+        type: "mention",
+        mentionee: {
+          type: "all",
+        },
+      },
+    },
+  };
+}
+
 export function verifyLineSignature(channelSecret, rawBody, signature) {
   if (!signature) return false;
 
@@ -40,36 +68,26 @@ export class LineClient {
     return response.json();
   }
 
-  async replyText(replyToken, text) {
+  async replyText(replyToken, text, options = {}) {
     if (!replyToken || replyToken === "00000000000000000000000000000000") return;
 
     await this.request("/message/reply", {
       method: "POST",
       body: JSON.stringify({
         replyToken,
-        messages: [
-          {
-            type: "text",
-            text,
-          },
-        ],
+        messages: [buildTextMessage(text, options)],
       }),
     });
   }
 
-  async pushText(to, text) {
+  async pushText(to, text, options = {}) {
     if (!to) return;
 
     await this.request("/message/push", {
       method: "POST",
       body: JSON.stringify({
         to,
-        messages: [
-          {
-            type: "text",
-            text,
-          },
-        ],
+        messages: [buildTextMessage(text, options)],
       }),
     });
   }
