@@ -123,7 +123,7 @@ export class ScheduledPushService {
       if (groupIds.length === 0 || !message) continue;
 
       for (const groupId of groupIds) {
-        await this.line.pushText(groupId, message);
+        await this.line.pushText(groupId, message, { mentionAll: true });
         sentCount += 1;
       }
       await this.sheets.updateValues(singleCellA1(sheetName, index + 1, 6), [[sentKey]]);
