@@ -32,8 +32,8 @@ class FakeLineClient {
     this.messages = [];
   }
 
-  async pushText(to, text) {
-    this.messages.push({ to, text });
+  async pushText(to, text, options = {}) {
+    this.messages.push({ to, text, options });
   }
 }
 
@@ -73,6 +73,7 @@ test("sends matching monthly push once and marks the row as sent", async () => {
   assert.equal(second.sentCount, 0);
   assert.equal(line.messages.length, 1);
   assert.equal(line.messages[0].to, "Cgroup");
+  assert.deepEqual(line.messages[0].options, { mentionAll: true });
   assert.equal(sheets.rows[0][6], "2026-01");
 });
 
